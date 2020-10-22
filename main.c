@@ -13,7 +13,7 @@
 #define F block
 #define G 112
 #define H random
-#define I 5
+#define I 29
 #define J sum
 #define K cv
 
@@ -39,8 +39,8 @@ void* write_random_numbers(void * wrn_data){
 
 void generate_and_write(unsigned char *src,
                         unsigned int file_number,
-                        pthread_mutex_t * mutexes,
-                        pthread_cond_t * cvs){
+                        pthread_mutex_t * mutex,
+                        pthread_cond_t * cv){
 
     FILE * urandom = fopen("/dev/urandom", "rb");
     size_t wrn_part =  A * 1024 * 1024 / D;
@@ -58,11 +58,10 @@ void generate_and_write(unsigned char *src,
         pthread_join(wrn_threads[i], NULL);
 
     fclose(urandom);
-
+    pthread_mutex_lock(mutex);
     for (int i = 0; i < file_number; i++){
         char result_name[13];
         snprintf(result_name,13, "lab_os_%d.bin", i);
-        pthread_mutex_lock(mutexes+i);
         FILE * file = fopen(result_name, "wb");
         size_t file_size = E*1024*1024;
         for (int j = 0; j < file_size; ){
@@ -72,9 +71,9 @@ void generate_and_write(unsigned char *src,
         }
         fclose(file);
         printf("%d data_generated\n", i);
-        pthread_cond_broadcast(cvs+i);
-        pthread_mutex_unlock(mutexes+i);
     }
+    pthread_cond_broadcast(cv);
+    pthread_mutex_unlock(mutex);
 }
 
 int convert_char_buf_2_int(unsigned char buf[]){
@@ -96,9 +95,9 @@ _Noreturn void* read_and_sum(void * ras_data){
     while(1){
         long long sum = 0;
         pthread_mutex_lock(args->mutex);
-        printf("%d wait on cond\n", pthread_self());
+        printf("%ld wait on cond\n", pthread_self());
         pthread_cond_wait(args->cv, args->mutex);
-        printf("%d waited\n", pthread_self());
+        printf("%ld waited\n", pthread_self());
         FILE *file = fopen(filename, "rb");
         unsigned char buf[G];
         for (unsigned int i = 0; i < 2*E*1024*1024/G; i++){
@@ -131,15 +130,13 @@ int main() {
 
     unsigned int file_number = A / E + (A % E > 0 ? 1 : 0);
 
-    pthread_mutex_t mutexes[file_number];
-    pthread_cond_t cvs[file_number];
+    pthread_mutex_t mutex;
+    pthread_cond_t cv;
 
-    for (int i = 0; i < file_number; i++){
-        pthread_mutex_init(&mutexes[i], NULL);
-        pthread_cond_init(&cvs[i], NULL);
-    }
+    pthread_mutex_init(&mutex, NULL);
+    pthread_cond_init(&cv, NULL);
 
-    generate_and_write(src, file_number, &mutexes[0], &cvs[0]);
+    generate_and_write(src, file_number, &mutex, &cv);
     printf("After filling");
     getchar();
     munmap(src, A*1024*1024);
@@ -157,12 +154,12 @@ int main() {
     for (int i = 0; i < I; i++){
         int file_count = i / (I / file_number);
         if (file_count == file_number) file_count--;
-        ras_args ras_data = {file_count, &mutexes[file_count], &cvs[file_count]};
+        ras_args ras_data = {file_count, &mutex, &cv};
         pthread_create(&ras_threads[i], NULL, read_and_sum, &ras_data);
     }
 
     while(1)
-        generate_and_write(src, file_number, &mutexes[0], &cvs[0]);
+        generate_and_write(src, file_number, &mutex, &cv);
 
     for (int i = 0; i < I; i++)
         pthread_join( ras_threads[0], NULL);

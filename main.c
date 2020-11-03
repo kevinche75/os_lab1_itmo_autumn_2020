@@ -1,21 +1,14 @@
 #include <stdio.h>
 #include<sys/mman.h>
 #include <pthread.h>
-#include <fcntl.h>
-#include <unistd.h>
 #include <stdlib.h>
 
 #define A 248
 #define B 0x936F88A5
-#define C mmap
 #define D 131
 #define E 170
-#define F block
 #define G 112
-#define H random
 #define I 29
-#define J sum
-#define K cv
 
 typedef struct{
     unsigned char * start;
@@ -35,6 +28,45 @@ void* write_random_numbers(void * wrn_data){
         i += fread(data->start + i, 1, data->count - i, data->urandom);
     }
     return NULL;
+}
+
+void generate_in_mem(unsigned char *src){
+    FILE * urandom = fopen("/dev/urandom", "rb");
+    size_t wrn_part =  A * 1024 * 1024 / D;
+    unsigned char * start = src;
+    pthread_t wrn_threads[D];
+    for (int i = 0; i<D-1; i++){
+        wrn_args wrn_data = {start, wrn_part, urandom};
+        pthread_create(&(wrn_threads[i]), NULL, write_random_numbers, &wrn_data);
+        start+=wrn_part;
+    }
+
+    wrn_args wrn_data = {start, wrn_part + A * 1024 * 1024 % D, urandom};
+    pthread_create(&(wrn_threads[D-1]), NULL, write_random_numbers, &wrn_data);
+    for(int i = 0; i < D; i++)
+        pthread_join(wrn_threads[i], NULL);
+
+    fclose(urandom);
+}
+
+void write_in_file(unsigned char *src,
+                   unsigned int file_number,
+                   pthread_mutex_t * mutex,
+                   pthread_cond_t * cv){
+
+    pthread_mutex_lock(mutex);
+    char result_name[13];
+    snprintf(result_name,13, "lab_os_%d.bin", file_number);
+    FILE * file = fopen(result_name, "wb");
+    size_t file_size = E*1024*1024;
+    for (unsigned long j = 0; j < file_size; ){
+        unsigned int block_size = file_size - j < G ? file_size - j : G;
+        j += fwrite( src + j, 1, block_size, file);
+    }
+    fclose(file);
+    printf("%d data_generated\n", file_number);
+    pthread_cond_broadcast(cv);
+    pthread_mutex_unlock(mutex);
 }
 
 void generate_and_write(unsigned char *src,
@@ -66,7 +98,7 @@ void generate_and_write(unsigned char *src,
         size_t file_size = E*1024*1024;
         for (int j = 0; j < file_size; ){
             unsigned int block = rand() % (A * 1024 * 1024 / G);
-            unsigned int block_size = file_size - j < G ? file_size - j < G : G;
+            unsigned int block_size = file_size - j < G ? file_size - j : G;
             j += fwrite( src + block*G, 1, block_size, file);
         }
         fclose(file);
@@ -101,8 +133,6 @@ _Noreturn void* read_and_sum(void * ras_data){
         FILE *file = fopen(filename, "rb");
         unsigned char buf[G];
         for (unsigned int i = 0; i < 2*E*1024*1024/G; i++){
-            unsigned int block = rand() % (2*E*1024*1024/G);
-            fseek(file, block*G, 0);
             if (fread(&buf, 1, G, file) != G) continue;
             else sum+=convert_char_buf_2_int(buf);
         }
@@ -113,7 +143,7 @@ _Noreturn void* read_and_sum(void * ras_data){
 }
 
 unsigned char* allocate_memory(){
-    return C((void *)B, A*1024*1024, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    return mmap((void *)B, A*1024*1024, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 }
 
 int main() {
@@ -128,7 +158,7 @@ int main() {
     printf("After allocation");
     getchar();
 
-    unsigned int file_number = A / E + (A % E > 0 ? 1 : 0);
+    const unsigned int file_number = A / E + (A % E > 0 ? 1 : 0);
 
     pthread_mutex_t mutex;
     pthread_cond_t cv;

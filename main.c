@@ -42,14 +42,19 @@ void generate_in_mem(unsigned char *src){
     size_t wrn_part =  A * 1024 * 1024 / D;
     unsigned char * start = src;
     pthread_t wrn_threads[D];
+    wrn_args wrn_data[D];
     for (int i = 0; i<D-1; i++){
-        wrn_args wrn_data = {start, wrn_part, urandom};
-        pthread_create(&(wrn_threads[i]), NULL, write_random_numbers, &wrn_data);
+        wrn_data[i].start = start;
+        wrn_data[i].count = wrn_part;
+        wrn_data[i].urandom = urandom;
+        pthread_create(&(wrn_threads[i]), NULL, write_random_numbers, &wrn_data[i]);
         start+=wrn_part;
     }
 
-    wrn_args wrn_data = {start, wrn_part + A * 1024 * 1024 % D, urandom};
-    pthread_create(&(wrn_threads[D-1]), NULL, write_random_numbers, &wrn_data);
+    wrn_data[D-1].start = start;
+    wrn_data[D-1].count = wrn_part + A * 1024 * 1024 % D;
+    wrn_data[D-1].urandom = urandom;
+    pthread_create(&(wrn_threads[D-1]), NULL, write_random_numbers, &wrn_data[D-1]);
     for(int i = 0; i < D; i++)
         pthread_join(wrn_threads[i], NULL);
 
@@ -86,14 +91,10 @@ _Noreturn void* thread_wif(void * thread_wif_args){
     while(1) write_in_file(args->src, args->file_number, args->mutex, args->cv);
 }
 
-int convert_char_buf_2_int(unsigned char buf[]){
+int convert_char_buf_2_int(unsigned char *begin, unsigned char *end){
     int sum = 0;
-    for (int i = 0; i < G / sizeof (int); i+=sizeof (int)){
-        int num = 0;
-        for (int j = 0; j < sizeof (int); j++){
-            num = (num<<8) + buf[i+j];
-        }
-        sum += num;
+    for (int * i = (int*) begin; i != (int*) end; i+=1){
+        sum += *i;
     }
     return sum;
 }
@@ -113,7 +114,7 @@ _Noreturn void* read_and_sum(void * ras_data){
         unsigned char buf[G];
         for (unsigned int i = 0; i < 2*E*1024*1024/G; i++){
             if (fread(&buf, 1, G, file) != G) continue;
-            else sum+=convert_char_buf_2_int(buf);
+            else sum+=convert_char_buf_2_int(&buf[0], &buf[G]);
         }
         printf("%d: %lld\n", f_n, sum);
         fclose(file);
